@@ -1,0 +1,86 @@
+---
+title: "glm_model"
+author: "Prashit Parikh"
+date: "11/01/2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+chooseCRANmirror(graphics=FLASE, ind=1)
+knitr::opts_chunk$set(echo = TRUE)
+
+install.packages("randomForest")
+library(randomForest)
+install.packages("caret")
+library(caret)
+install.packages("tidyverse")
+library(tidyverse)
+install.packages("glmnet")
+library(glmnet)
+```
+
+This code was adapted from the following script:
+https://github.com/SexChrLab/SexInference/blob/main/RNAseq/sex_inference_model.R
+
+```{r, warning=FALSE}
+### Building the glm model -----
+
+# Imported from the create_regression_data.R script output
+data <- read.csv("inference_regression_data.csv")
+
+# Split the data into an experiment and training set
+
+set.seed(1020)
+experiment.samples <- data$sex %>% 
+  createDataPartition(p = 0.5, list = FALSE)
+training.data  <- data[experiment.samples, ]
+experiment.data <- data[-experiment.samples, ]
+
+# Split the training set into a train and test set
+
+set.seed(1020)
+training.samples <- training.data$sex %>% 
+  createDataPartition(p = 0.5, list = FALSE)
+train.data <- data[training.samples, ]
+test.data <- data[-training.samples, ]
+
+# Dummy code categorical predictor variables
+x <- model.matrix(sex~., train.data)[,-1]
+# Convert the outcome (class) to a numerical variable
+y <- ifelse(train.data$sex == "female", 1, 0)
+
+# Run lasso model with cross-validation
+cv.lasso <- cv.glmnet(x, y, alpha = 1, family = "binomial")
+plot(cv.lasso)
+cv.lasso$lambda.min
+
+coef(cv.lasso, cv.lasso$lambda.min)
+coef(cv.lasso, cv.lasso$lambda.1se)
+
+# Final model with lambda.min
+lasso.model <- glmnet(x, y, alpha = 1, family = "binomial",
+                      lambda = cv.lasso$lambda.min)
+# Make prediction on test data
+x.test <- model.matrix(sex ~., test.data)[,-1]
+probabilities <- lasso.model %>% predict(newx = x.test)
+predicted.classes <- ifelse(probabilities > 0.5, "female", "male")
+# Model accuracy
+observed.classes <- test.data$sex
+mean(predicted.classes == observed.classes)
+
+# Run model on experiment data
+x.experiment <- model.matrix(sex ~., experiment.data)[,-1]
+probabilities <- lasso.model %>% predict(newx = x.experiment)
+predicted.classes <- ifelse(probabilities > 0.5, "female", "male")
+# Model accuracy
+observed.classes <- experiment.data$sex
+mean(predicted.classes == observed.classes)
+# Comparing predicted values to true values
+df = cbind(as.data.frame(predicted.classes)$s0, experiment.data$sex)
+
+# These samples were incorrectly predicted
+which(df[,1]!=df[,2])
+experiment.data[c(178, 269, 270, 272, 273, 274, 281, 282, 283, 284, 287),]
+```
